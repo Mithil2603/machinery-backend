@@ -1,100 +1,193 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const db = require('../db/db');
+const db = require("../db/db");
+const {
+  validateCategory,
+  validateProduct,
+} = require("../middlewares/validators");
+const { validationResult } = require("express-validator");
+const { isAuthenticated, isAdmin } = require("../middlewares/auth");
 
 // 1. Category Routes
-// Add a new category
-router.post('/categories', (req, res) => {
+
+// Retrieve all categories (Public Access)
+router.get("/categories", (req, res) => {
+  const sql = `SELECT * FROM category_tbl`;
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
+});
+
+// Add a new category (Admin Access Only)
+router.post(
+  "/categories",
+  isAuthenticated,
+  isAdmin,
+  validateCategory,
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
     const { category_name, category_description, category_img } = req.body;
 
-    if (!category_name) {
-        return res.status(400).json({ error: 'Category name is required' });
-    }
-
     const sql = `INSERT INTO category_tbl (category_name, category_description, category_img) VALUES (?, ?, ?)`;
-    db.query(sql, [category_name, category_description, JSON.stringify(category_img)], (err, result) => {
+    db.query(
+      sql,
+      [category_name, category_description, JSON.stringify(category_img)],
+      (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({ message: 'Category added successfully', categoryId: result.insertId });
-    });
-});
-
-// Retrieve all categories
-router.get('/categories', (req, res) => {
-    const sql = `SELECT * FROM category_tbl`;
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json(results);
-    });
-});
+        res.status(201).json({
+          message: "Category added successfully",
+          categoryId: result.insertId,
+        });
+      }
+    );
+  }
+);
 
 // 2. Product Routes
-// Add a new product
-router.post('/products', (req, res) => {
-    const { category_id, product_name, product_description, product_img } = req.body;
 
-    if (!product_name || !category_id) {
-        return res.status(400).json({ error: 'Product name and category ID are required' });
+// Retrieve all products (Public Access)
+router.get("/products", (req, res) => {
+  const sql = `SELECT * FROM product_tbl`;
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
+});
+
+// Add a new product (Admin Access Only)
+router.post(
+  "/products",
+  isAuthenticated,
+  isAdmin,
+  validateProduct,
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
+    const { category_id, product_name, product_description, product_img } =
+      req.body;
+
     const sql = `INSERT INTO product_tbl (category_id, product_name, product_description, product_img) VALUES (?, ?, ?, ?)`;
-    db.query(sql, [category_id, product_name, JSON.stringify(product_description), JSON.stringify(product_img)], (err, result) => {
+    db.query(
+      sql,
+      [
+        category_id,
+        product_name,
+        JSON.stringify(product_description),
+        JSON.stringify(product_img),
+      ],
+      (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({ message: 'Product added successfully', productId: result.insertId });
-    });
-});
+        res.status(201).json({
+          message: "Product added successfully",
+          productId: result.insertId,
+        });
+      }
+    );
+  }
+);
 
-// Retrieve all products
-router.get('/products', (req, res) => {
-    const sql = `SELECT * FROM product_tbl`;
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json(results);
-    });
-});
+// Retrieve products by category ID (Public Access)
+router.get("/products/category/:categoryId", (req, res) => {
+  const { categoryId } = req.params;
 
-// Retrieve products by category ID
-router.get('/products/category/:categoryId', (req, res) => {
-    const { categoryId } = req.params;
-
-    const sql = `SELECT * FROM product_tbl WHERE category_id = ?`;
-    db.query(sql, [categoryId], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json(results);
-    });
+  const sql = `SELECT * FROM product_tbl WHERE category_id = ?`;
+  db.query(sql, [categoryId], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
 });
 
 // 3. Order Placement
-// Place a new order
-router.post('/orders', (req, res) => {
-    const { user_id, order_details } = req.body; // order_details is an array of product details
 
-    if (!user_id || !order_details || order_details.length === 0) {
-        return res.status(400).json({ error: 'User ID and order details are required' });
-    }
+// Place a new order (Authenticated Users Only)
+router.post("/orders", isAuthenticated, (req, res) => {
+  const { user_id, order_details } = req.body;
 
-    // Insert into order_tbl
-    const sqlOrder = `INSERT INTO order_tbl (user_id) VALUES (?)`;
-    db.query(sqlOrder, [user_id], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
+  if (!user_id || !order_details || order_details.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "User ID and order details are required" });
+  }
 
-        const orderId = result.insertId;
-        const orderDetailsSql = `INSERT INTO order_details_tbl (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length) VALUES ?`;
+  const sqlOrder = `INSERT INTO order_tbl (user_id) VALUES (?)`;
+  db.query(sqlOrder, [user_id], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
 
-        const orderDetailsData = order_details.map(detail => [
-            orderId,
-            detail.product_id,
-            detail.quantity,
-            detail.no_of_ends,
-            detail.creel_type,
-            detail.creel_pitch,
-            detail.bobin_length
-        ]);
+    const orderId = result.insertId;
+    const orderDetailsSql = `INSERT INTO order_details_tbl (order_id, product_id, quantity, no_of_ends, creel_type, creel_pitch, bobin_length) VALUES ?`;
 
-        db.query(orderDetailsSql, [orderDetailsData], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.status(201).json({ message: 'Order placed successfully', orderId });
-        });
+    const orderDetailsData = order_details.map((detail) => [
+      orderId,
+      detail.product_id,
+      detail.quantity,
+      detail.no_of_ends,
+      detail.creel_type,
+      detail.creel_pitch,
+      detail.bobin_length,
+    ]);
+
+    db.query(orderDetailsSql, [orderDetailsData], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({ message: "Order placed successfully", orderId });
     });
+  });
+});
+
+// Add feedback for a product (Authenticated Access - Only logged-in users can post)
+router.post("/products/:productId/feedback", (req, res) => {
+  // Check if the user is logged in
+  if (!req.session.userId) {
+    return res
+      .status(403)
+      .json({ error: "You must be logged in to post feedback" });
+  }
+
+  const { productId } = req.params;
+  const { feedback_text, feedback_rating } = req.body;
+
+  if (!feedback_text || !feedback_rating) {
+    return res
+      .status(400)
+      .json({ error: "Feedback text and rating are required" });
+  }
+
+  if (feedback_rating < 1 || feedback_rating > 5) {
+    return res
+      .status(400)
+      .json({ error: "Feedback rating must be between 1 and 5" });
+  }
+
+  const sql = `INSERT INTO feedback_tbl (product_id, feedback_text, feedback_rating, user_id) VALUES (?, ?, ?, ?)`;
+  db.query(
+    sql,
+    [productId, feedback_text, feedback_rating, req.session.userId], // Store the user ID in the feedback
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({
+        message: "Feedback submitted successfully",
+        feedbackId: result.insertId,
+      });
+    }
+  );
+});
+
+// Get feedback for a product (Public Access)
+router.get("/products/:productId/feedback", (req, res) => {
+  const { productId } = req.params;
+
+  const sql = `SELECT * FROM feedback_tbl WHERE product_id = ? ORDER BY feedback_date DESC`;
+  db.query(sql, [productId], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(200).json(results);
+  });
 });
 
 module.exports = router;

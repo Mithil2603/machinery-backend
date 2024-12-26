@@ -1,9 +1,10 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const db = require("../db/db");
+const { hashPassword, verifyPassword } = require("../utils/passwordUtils");
+const cookieParser = require("cookie-parser");
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.post("/signup", async (req, res) => {
 
   try {
     // Hash the password
-    const hashedPassword = await bcrypt.hash(user_password, 10);
+    const hashedPassword = await hashPassword(user_password);
 
     // Insert user into database
     const sql = `INSERT INTO user_tbl (first_name, last_name, email, phone_number, company_name, user_password, user_type) 
@@ -51,7 +52,6 @@ router.post("/signup", async (req, res) => {
 router.post("/login", (req, res) => {
   const { email, user_password } = req.body;
 
-  // Check if user exists
   const sql = `SELECT * FROM user_tbl WHERE email = ?`;
   db.query(sql, [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -59,7 +59,7 @@ router.post("/login", (req, res) => {
       return res.status(404).json({ message: "User not found." });
 
     const user = results[0];
-    const isPasswordValid = await bcrypt.compare(
+    const isPasswordValid = await verifyPassword(
       user_password,
       user.user_password
     );
@@ -67,17 +67,25 @@ router.post("/login", (req, res) => {
     if (!isPasswordValid)
       return res.status(401).json({ message: "Invalid credentials." });
 
-    // Generate a JWT token
+    // Generate a JWT token after successful login
     const token = jwt.sign(
       { userId: user.user_id, userType: user.user_type },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
-    res.status(200).json({ message: "Login successful.", token });
+
+    // Send the token in a cookie
+    res.cookie("authToken", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 1000, // 1 hour expiry
+    });
+
+    res.status(200).json({ message: "Login successful." });
   });
 });
 
-// forgot password route
+// Forgot Password Route
 router.post("/forgot-password", (req, res) => {
   const { email } = req.body;
 
@@ -99,18 +107,16 @@ router.post("/forgot-password", (req, res) => {
       async (err) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        // Send the reset link via email
+        // Send the reset link via email (with the token in the URL)
         const transporter = nodemailer.createTransport({
-          service: "gmail", // Or your email provider
+          service: "gmail",
           auth: {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS,
           },
         });
 
-        const resetLink = `${req.protocol}://${req.get(
-          "host"
-        )}/users/reset-password/${resetToken}`;
+        const resetLink = `${req.protocol}://${req.get("host")}/users/reset-password/${resetToken}`;
         const mailOptions = {
           from: process.env.EMAIL_USER,
           to: email,
@@ -120,6 +126,14 @@ router.post("/forgot-password", (req, res) => {
 
         try {
           await transporter.sendMail(mailOptions);
+
+          // Set the token as an HTTP-only cookie
+          res.cookie("resetToken", resetToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production", // Only secure cookies in production
+            maxAge: 60 * 60 * 1000, // 1-hour expiration
+          });
+
           res.status(200).json({ message: "Password reset email sent." });
         } catch (err) {
           res.status(500).json({ error: "Failed to send email." });
@@ -129,20 +143,7 @@ router.post("/forgot-password", (req, res) => {
   });
 });
 
-// validate reset token
-router.get("/reset-password/:token", (req, res) => {
-  const { token } = req.params;
-
-  const sql = `SELECT * FROM user_tbl WHERE reset_token = ? AND reset_token_expires > NOW()`;
-  db.query(sql, [token], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0)
-      return res.status(400).json({ message: "Invalid or expired token." });
-
-    res.status(200).json({ message: "Token is valid." });
-  });
-});
-
+// Reset Password Route
 router.post("/reset-password/:token", async (req, res) => {
   const { token } = req.params;
   const { newPassword } = req.body;
@@ -154,14 +155,41 @@ router.post("/reset-password/:token", async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired token." });
 
     const user = results[0];
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await hashPassword(newPassword);
 
     const updateSql = `UPDATE user_tbl SET user_password = ?, reset_token = NULL, reset_token_expires = NULL WHERE user_id = ?`;
     db.query(updateSql, [hashedPassword, user.user_id], (err) => {
       if (err) return res.status(500).json({ error: err.message });
+
+      // Clear the old token cookie after password reset
+      res.clearCookie("authToken");
+
+      // Generate a new token with the updated password
+      const token = jwt.sign(
+        { userId: user.user_id, userType: user.user_type },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h" }
+      );
+
+      // Set the new token in the cookie
+      res.cookie("authToken", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 1000, // 1 hour expiry
+      });
+
       res.status(200).json({ message: "Password reset successfully." });
     });
   });
+});
+
+// Logout Route
+router.post("/logout", (req, res) => {
+  // Clear the authToken cookie
+  res.clearCookie("authToken");
+
+  // Respond with a message indicating successful logout
+  res.status(200).json({ message: "Logged out successfully." });
 });
 
 module.exports = router;
