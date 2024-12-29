@@ -94,6 +94,51 @@ router.post(
   }
 );
 
+// Update product details (Admin Access Only)
+router.patch("/products/:productId", isAuthenticated, isAdmin, (req, res) => {
+  const { productId } = req.params;
+  const { category_id, product_name, product_description, product_img } =
+    req.body;
+
+  const updateFields = [];
+  const updateValues = [];
+
+  if (category_id) {
+    updateFields.push("category_id = ?");
+    updateValues.push(category_id);
+  }
+  if (product_name) {
+    updateFields.push("product_name = ?");
+    updateValues.push(product_name);
+  }
+  if (product_description) {
+    updateFields.push("product_description = ?");
+    updateValues.push(JSON.stringify(product_description));
+  }
+  if (product_img) {
+    updateFields.push("product_img = ?");
+    updateValues.push(JSON.stringify(product_img));
+  }
+
+  if (updateFields.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "No fields provided for update" });
+  }
+
+  updateValues.push(productId);
+
+  const sql = `UPDATE product_tbl SET ${updateFields.join(", ")} WHERE product_id = ?`;
+
+  db.query(sql, updateValues, (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    res.status(200).json({ message: "Product updated successfully" });
+  });
+});
+
 // Retrieve products by category ID (Public Access)
 router.get("/products/category/:categoryId", (req, res) => {
   const { categoryId } = req.params;
@@ -142,7 +187,7 @@ router.post("/orders", isAuthenticated, (req, res) => {
 });
 
 // Add feedback for a product (Authenticated Access - Only logged-in users can post)
-router.post("/products/:productId/feedback", (req, res) => {
+router.post("/products/:productId/feedback", isAuthenticated, (req, res) => {
   // Check if the user is logged in
   if (!req.session.userId) {
     return res
