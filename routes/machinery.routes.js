@@ -95,7 +95,7 @@ router.post(
 );
 
 // Update product details (Admin Access Only)
-router.patch("/products/:productId", isAuthenticated, isAdmin, (req, res) => {
+router.patch("/products/:productId", (req, res) => {
   const { productId } = req.params;
   const { category_id, product_name, product_description, product_img } =
     req.body;
