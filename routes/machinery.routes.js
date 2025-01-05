@@ -59,6 +59,20 @@ router.get("/products", (req, res) => {
   });
 });
 
+// Retrieve a specific product by productId (Public Access)
+router.get("/products/:productId", (req, res) => {
+  const { productId } = req.params;
+
+  const sql = `SELECT * FROM product_tbl WHERE product_id = ?`;
+  db.query(sql, [productId], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (result.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    res.status(200).json(result[0]);
+  });
+});
+
 // Add a new product (Admin Access Only)
 router.post(
   "/products",
