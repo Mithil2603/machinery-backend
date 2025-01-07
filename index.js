@@ -20,7 +20,11 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:3001", "http://localhost:3000"], // Replace with your frontend's URL
+  methods: ["GET", "POST", "PUT", "DELETE"], // Allowed HTTP methods
+  credentials: true, // Allow cookies and credentials
+}));
 
 app.use(express.json());
 app.use(cookieParser());
